@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class AgentChat(BaseModel):
     id: UUID
+    user_id: UUID
     timestamp: datetime
     model: str
     message: str
