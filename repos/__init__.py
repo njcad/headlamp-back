@@ -1,3 +1,3 @@
-from .supabase import get_supabase_client
+from .database import get_supabase
 
-__all__ = ["get_supabase_client"]
+__all__ = ["get_supabase"]
