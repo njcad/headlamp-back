@@ -6,7 +6,8 @@ from pydantic import BaseModel, Field
 
 class Service(BaseModel):
     id: int
-    name: str
+    organization_name: str
+    program_name: str
     address: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
