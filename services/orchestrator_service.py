@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 from models.chat_response import ChatResponse
-from repos import agent_chat_repository, human_chat_repository
+from repos import agent_chat_repository, human_chat_repository, user_repository
 from services.llm_service import LLMService
 
 
@@ -32,6 +32,9 @@ class OrchestratorService:
         5. Save agent response
         6. Return formatted response
         """
+        # 0. Ensure user exists (create on first chat)
+        user_repository.ensure_exists(user_id=user_id)
+
         # 1. Save user message
         # If clickedOrgIds is present, include it in the message context
         if clickedOrgIds:
@@ -50,7 +53,10 @@ class OrchestratorService:
         )
         
         # 4. Handle tool calls if present
-        response = OrchestratorService._handle_llm_response(llm_response=llm_response)
+        response = OrchestratorService._handle_llm_response(
+            llm_response=llm_response,
+            user_id=user_id,
+        )
         
         # 5. Save agent response
         agent_chat_repository.create(
@@ -96,7 +102,7 @@ class OrchestratorService:
         ]
 
     @staticmethod
-    def _handle_llm_response(llm_response: dict) -> ChatResponse:
+    def _handle_llm_response(llm_response: dict, user_id: UUID) -> ChatResponse:
         """
         Process LLM response and handle tool calls if present.
         Returns a ChatResponse with orgs if matching occurred.
@@ -106,6 +112,7 @@ class OrchestratorService:
         orgs = llm_response.get("orgs")  # LLM service returns orgs if matching tool was called
         
         return ChatResponse(
+            user_id=user_id,
             message=message,
             orgs=orgs,
         )

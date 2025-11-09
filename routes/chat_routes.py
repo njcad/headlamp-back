@@ -10,6 +10,7 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
     """Handle chat requests from users."""
+    print(request)
     return await ControllerService.handle_chat(request)
 
 

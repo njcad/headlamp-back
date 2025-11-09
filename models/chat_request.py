@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
     """Request model matching frontend UserMessagePayload."""
-    user_id: UUID
+    user_id: Optional[UUID] = None
     message: str
     clickedOrgIds: Optional[list[int]] = None
 

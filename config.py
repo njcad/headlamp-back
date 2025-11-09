@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "Headlamp API"
     debug: bool = False
 
-    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False)
+    model_config = SettingsConfigDict(env_file=".env", case_sensitive=False, extra="ignore")
 
 
 def get_settings() -> Settings:

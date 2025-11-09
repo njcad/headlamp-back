@@ -1,6 +1,7 @@
 from models.chat_request import ChatRequest
 from models.chat_response import ChatResponse
 from services.orchestrator_service import OrchestratorService
+from repos import user_repository
 
 
 class ControllerService:
@@ -17,10 +18,15 @@ class ControllerService:
         - Formats the response
         - Handles errors (can be extended)
         """
-        # Call orchestrator to handle business logic
-        # Orchestrator returns full ChatResponse with message and optional orgs
+        # Ensure user exists (create if missing to get Supabase default UUID)
+        if request.user_id is None:
+            user = user_repository.create()
+        else:
+            user = user_repository.ensure_exists(user_id=request.user_id)
+
+        # Call orchestrator to handle business logic (returns ChatResponse with user_id)
         return await OrchestratorService.chat(
-            user_id=request.user_id,
+            user_id=user.id,
             message=request.message,
             clickedOrgIds=request.clickedOrgIds,
         )
