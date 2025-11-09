@@ -32,6 +32,7 @@ Return the IDs of the top 3 most relevant organizations, ranked from most to lea
 def format_organizations(organizations: list) -> str:
     """
     Format a list of Organization objects into text for the prompt.
+    Truncates descriptions to first and last 100 characters to avoid context rot.
     
     Args:
         organizations: List of Organization model instances
@@ -39,11 +40,23 @@ def format_organizations(organizations: list) -> str:
     Returns:
         Formatted text string with organization details
     """
+    def truncate_description(description: str | None, max_chars: int = 100) -> str:
+        """Truncate description to first and last max_chars characters."""
+        if not description:
+            return "No description available"
+        
+        if len(description) <= max_chars * 2:
+            # If description is short enough, return as-is
+            return description
+        
+        # Return first max_chars + "..." + last max_chars
+        return f"{description[:max_chars]}...{description[-max_chars:]}"
+    
     return "\n\n".join([
         f"ID: {org.id}\n"
         f"Organization: {org.organization_name}\n"
         f"Program: {org.program_name}\n"
-        f"Description: {org.description or 'No description available'}\n"
+        f"Description: {truncate_description(org.description)}\n"
         f"Services: {', '.join([str(qid) for qid in org.intake_question_ids]) if org.intake_question_ids else 'N/A'}"
         for org in organizations
     ])

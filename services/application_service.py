@@ -83,27 +83,47 @@ class ApplicationService:
     async def create_applications(
         user_id: UUID,
         organization_ids: list[int],
-        conversation_history: list[dict],
+        application_draft: Optional[ApplicationDraft] = None,
     ) -> list[Application]:
         """
         Create applications for the given organization IDs.
         
+        Uses the application_draft if provided (which may have been modified by the user),
+        otherwise falls back to generating from conversation history.
+        
         Args:
             user_id: The user creating the applications
             organization_ids: List of organization IDs to create applications for
-            conversation_history: Full conversation history in OpenAI format
+            application_draft: Optional draft containing user-modified application content
         
         Returns:
             List of created Application objects
         """
-        # Get all intake questions
-        intake_questions = intake_question_repository.get_all()
-        
         # Get all organizations to validate IDs and get their details
         all_orgs = org_repository.get_all()
         org_dict = {org.id: org for org in all_orgs}
         
         created_applications = []
+        
+        # Use application content from draft if provided (user may have modified it)
+        if not application_draft:
+            raise ValueError("application_draft is required when creating applications")
+        
+        # Build application content with contact information from the draft
+        # The user may have modified name, phone, email, or the summary content
+        contact_section = ""
+        if application_draft.name or application_draft.phone or application_draft.email:
+            contact_section = "CONTACT INFORMATION:\n"
+            if application_draft.name:
+                contact_section += f"Name: {application_draft.name}\n"
+            if application_draft.phone:
+                contact_section += f"Phone: {application_draft.phone}\n"
+            if application_draft.email:
+                contact_section += f"Email: {application_draft.email}\n"
+            contact_section += "\n"
+        
+        # Combine contact info with the modified application content
+        application_content = contact_section + application_draft.summary
         
         # Create an application for each selected organization
         for org_id in organization_ids:
@@ -112,25 +132,7 @@ class ApplicationService:
                 print(f"Warning: Organization {org_id} not found, skipping application creation")
                 continue
             
-            organization = org_dict[org_id]
-            
-            # Get intake questions relevant to this organization
-            # (if organization has specific intake_question_ids, filter to those)
-            relevant_questions = intake_questions
-            if organization.intake_question_ids:
-                relevant_questions = [
-                    q for q in intake_questions 
-                    if q.id in organization.intake_question_ids
-                ]
-            
-            # Generate application content using LLM
-            application_content = await LLMService.generate_application_content(
-                conversation_history=conversation_history,
-                intake_questions=relevant_questions,
-                organization_name=organization.organization_name,
-            )
-            
-            # Create application record
+            # Create application record with the draft content (including any user modifications)
             application = application_repository.create(
                 user_id=user_id,
                 organization_id=org_id,

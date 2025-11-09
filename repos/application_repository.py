@@ -1,4 +1,3 @@
-from datetime import datetime
 from uuid import UUID, uuid4
 
 from repos.supabase import get_supabase_client
@@ -20,10 +19,12 @@ def create(
         "user_id": str(user_id),
         "organization_id": organization_id,
         "content": content,
+        "urgent": False,
+        # submitted_at is auto-populated by Supabase if default is set
     }
     
     response = client.table("applications").insert(data).execute()
-    
+    print(f"Application created: {response.data}")
     if not response.data:
         raise ValueError("Failed to create application")
     

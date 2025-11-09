@@ -1,6 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
+from models.application_draft import ApplicationDraft
 from models.chat_response import ChatResponse
 from repos import agent_chat_repository, human_chat_repository, user_repository
 from services.application_service import ApplicationService
@@ -22,6 +23,7 @@ class OrchestratorService:
         message: str,
         clickedOrgIds: Optional[list[int]] = None,
         doApply: Optional[list[int]] = None,
+        application_draft: Optional[ApplicationDraft] = None,
     ) -> ChatResponse:
         """
         Main entry point for chat requests.
@@ -53,19 +55,17 @@ class OrchestratorService:
         # 2. Get conversation history (merged and sorted)
         conversation_history = OrchestratorService._get_conversation_history(user_id)
         
-        application_draft = None
-        
         # 2.5. If doApply is present, create actual applications
+        print(f"doApply: {doApply}")
         if doApply:
-            print(f"Submitting applications for organizations: {doApply}")
+            print(f"Creating applications for organizations: {doApply}")
             await ApplicationService.create_applications(
                 user_id=user_id,
                 organization_ids=doApply,
-                conversation_history=conversation_history,
+                application_draft=application_draft,
             )
         # 2.6. If clickedOrgIds is present (but not doApply), create application drafts
         elif clickedOrgIds:
-            print(f"Creating application draft for organizations: {clickedOrgIds}")
             application_draft = await ApplicationService.create_application_draft(
                 organization_ids=clickedOrgIds,
                 conversation_history=conversation_history,
@@ -91,7 +91,7 @@ class OrchestratorService:
             model=llm_response.get("model", "gpt-4"),
             tool_calls=llm_response.get("tool_calls"),
         )
-        
+        print(f"response: {response}")
         return response
 
     @staticmethod
@@ -131,16 +131,18 @@ class OrchestratorService:
     def _handle_llm_response(
         llm_response: dict,
         user_id: UUID,
-        application_draft=None,
+        application_draft: Optional[ApplicationDraft] = None,
     ) -> ChatResponse:
         """
         Process LLM response and handle tool calls if present.
-        Returns a ChatResponse with orgs if matching occurred, or application_draft if created.
+        Returns a ChatResponse with orgs if matching occurred, or applicationDraft if created.
         Uses implicit state: presence of orgs indicates matching phase, presence of draft indicates confirmation needed.
         """
         message = llm_response.get("message", "")
         orgs = llm_response.get("orgs")  # LLM service returns orgs if matching tool was called
+        print(f"DEBUG orchestrator: orgs from llm_response: {orgs}, type: {type(orgs)}")
         
+        # Convert snake_case to camelCase for frontend (ChatResponse model expects applicationDraft)
         return ChatResponse(
             user_id=user_id,
             message=message,

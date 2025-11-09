@@ -25,11 +25,14 @@ class ControllerService:
             user = user_repository.ensure_exists(user_id=request.user_id)
 
         # Call orchestrator to handle business logic (returns ChatResponse with user_id)
+        # Convert camelCase from request to snake_case for Python code
+        print(f"request: {request}")
         return await OrchestratorService.chat(
             user_id=user.id,
             message=request.message,
             clickedOrgIds=request.clickedOrgIds,
             doApply=request.doApply,
+            application_draft=request.applicationDraft,
         )
 
 

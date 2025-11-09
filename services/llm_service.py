@@ -27,7 +27,7 @@ class LLMService:
             "type": "function",
             "function": {
                 "name": "match_nonprofits",
-                "description": "Find the top 3 most relevant nonprofit organizations based on the conversation history. Use this when you have gathered enough information about the person's needs and situation.",
+                "description": "Find the top 3 most relevant nonprofit organizations based on the conversation history. You MUST call this tool when you have gathered enough information about the person's needs and situation, or if they say they don't want to answer more questions. If the person has shared their basic needs (like housing, food, etc.) and location, you have enough information to call this tool.",
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -98,14 +98,24 @@ class LLMService:
             *conversation_history,
         ]
         
+        print(f"DEBUG: System prompt length: {len(system_prompt)}")
+        print(f"DEBUG: Number of intake questions: {len(question_texts)}")
+        print(f"DEBUG: Conversation history length: {len(conversation_history)}")
+        print(f"DEBUG: Tool choice: auto")
+        print(f"DEBUG: Available tools: {[tool['function']['name'] for tool in LLMService.TOOLS]}")
+        
         # Call OpenAI API
-        model = "gpt-4"  # or "gpt-4-turbo-preview" for newer models
+        model = "gpt-5-mini"  # or "gpt-4-turbo-preview" for newer models
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
             tools=LLMService.TOOLS,
             tool_choice="auto",  # Let the model decide when to use tools
         )
+        
+        print(f"DEBUG: Response received. Has tool_calls: {hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls is not None}")
+        if hasattr(response.choices[0].message, 'tool_calls') and response.choices[0].message.tool_calls:
+            print(f"DEBUG: Number of tool_calls in response: {len(response.choices[0].message.tool_calls)}")
         
         # Extract response
         assistant_message = response.choices[0].message
@@ -115,6 +125,10 @@ class LLMService:
         
         # Handle tool calls
         if assistant_message.tool_calls:
+            print(f"DEBUG: Tool calls detected! Number of tool calls: {len(assistant_message.tool_calls)}")
+            for i, tc in enumerate(assistant_message.tool_calls):
+                print(f"DEBUG: Tool call {i}: name={tc.function.name}, id={tc.id}")
+            
             tool_calls = [
                 {
                     "id": tc.id,
@@ -132,17 +146,29 @@ class LLMService:
             for tool_call in assistant_message.tool_calls:
                 function_name = tool_call.function.name
                 function_args = json.loads(tool_call.function.arguments)
+                print(f"DEBUG: Executing tool call: {function_name} with args: {function_args}")
                 
                 if function_name == "match_nonprofits":
+                    print(f"DEBUG: match_nonprofits tool called! Calling _match_nonprofits...")
                     # Execute matching logic
                     matched_orgs = await LLMService._match_nonprofits(conversation_history)
+                    print(f"DEBUG: _match_nonprofits returned: {matched_orgs}")
+                    print(f"DEBUG: Type of matched_orgs: {type(matched_orgs)}")
+                    print(f"DEBUG: Length: {len(matched_orgs) if matched_orgs else 0}")
+                    if matched_orgs:
+                        print(f"DEBUG: First org type: {type(matched_orgs[0])}")
+                        print(f"DEBUG: First org: {matched_orgs[0]}")
+                        print(f"DEBUG: First org dict/model_dump: {matched_orgs[0].model_dump() if hasattr(matched_orgs[0], 'model_dump') else matched_orgs[0].dict()}")
+                    
                     orgs = matched_orgs
+                    print(f"DEBUG: Set orgs = matched_orgs. orgs now: {orgs}")
+                    print(f"DEBUG: orgs type: {type(orgs)}, is None: {orgs is None}, length: {len(orgs) if orgs else 0}")
                     
                     tool_results.append({
                         "tool_call_id": tool_call.id,
                         "role": "tool",
                         "name": function_name,
-                        "content": json.dumps([org.dict() for org in matched_orgs]),
+                        "content": json.dumps([org.model_dump() if hasattr(org, 'model_dump') else org.dict() for org in matched_orgs]),
                     })
                 
                 elif function_name == "extract_responses":
@@ -172,6 +198,10 @@ class LLMService:
                 final_message = final_response.choices[0].message
                 message_content = final_message.content or message_content
         
+        print(f"DEBUG: Final return - orgs: {orgs}, type: {type(orgs)}, is None: {orgs is None}")
+        if orgs:
+            print(f"DEBUG: orgs length: {len(orgs)}")
+            print(f"DEBUG: orgs contents: {[str(org) for org in orgs]}")
         return {
             "message": message_content,
             "model": model,
@@ -193,8 +223,10 @@ class LLMService:
         Returns:
             List of top 3 most relevant organizations as OrgSummary objects
         """
+        print(f"DEBUG _match_nonprofits: Starting matching process")
         # Get all organizations
         organizations = org_repository.get_all()
+        print(f"DEBUG _match_nonprofits: Found {len(organizations)} organizations in database")
         
         if not organizations:
             # Return empty list if no organizations found
@@ -222,11 +254,18 @@ class LLMService:
         conversation_text = format_conversation_history(conversation_history)
         orgs_text = format_organizations(organizations)
         
+        # Debug: Print length of org descriptions
+        print(f"DEBUG _match_nonprofits: Total orgs_text length: {len(orgs_text)}")
+        for org in organizations:
+            desc_length = len(org.description) if org.description else 0
+            print(f"DEBUG _match_nonprofits: Org {org.id} ({org.organization_name}): description length={desc_length}, program_name length={len(org.program_name) if org.program_name else 0}")
+        
         # Create the matching prompt
         matching_prompt = get_matching_prompt(conversation_text, orgs_text)
+        print(f"DEBUG _match_nonprofits: Matching prompt length: {len(matching_prompt)}")
         
         # Call OpenAI API to get top 3 org IDs using tool calling
-        model = "gpt-4"
+        model = "gpt-5-mini"
         
         # Define function for structured output
         match_function = {
@@ -313,7 +352,13 @@ class LLMService:
                     )
                 )
         
-        return matched_orgs[:3]
+        result = matched_orgs[:3]
+        print(f"DEBUG _match_nonprofits: Returning {len(result)} orgs")
+        print(f"DEBUG _match_nonprofits: Return type: {type(result)}")
+        if result:
+            print(f"DEBUG _match_nonprofits: First org type: {type(result[0])}")
+            print(f"DEBUG _match_nonprofits: First org: {result[0]}")
+        return result
 
     @staticmethod
     async def generate_application_content(
@@ -368,7 +413,7 @@ Please generate an application document that includes:
 Format the response as a clear, professional document suitable for a nonprofit organization to review. Use clear headings and formatting."""
 
         # Call OpenAI API
-        model = "gpt-4"
+        model = "gpt-5-mini"
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -423,7 +468,7 @@ Write a concise, professional summary that captures:
 Keep it to 2-3 sentences."""
 
         # Call OpenAI API
-        model = "gpt-4"
+        model = "gpt-5-mini"
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -505,7 +550,7 @@ If any information is not mentioned in the conversation, return an empty string 
         }
 
         # Call OpenAI API with tool calling
-        model = "gpt-4"
+        model = "gpt-5-mini"
         response = await client.chat.completions.create(
             model=model,
             messages=[
