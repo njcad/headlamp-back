@@ -1,3 +1,4 @@
+
 import json
 from typing import Optional
 
@@ -6,6 +7,11 @@ from openai import OpenAI
 from config import settings
 from models.org import OrgSummary
 from prompts.intake import get_intake_system_prompt
+from prompts.matching import (
+    format_conversation_history,
+    format_organizations,
+    get_matching_prompt,
+)
 from repos import intake_question_repository, org_repository
 
 
@@ -176,11 +182,16 @@ class LLMService:
     @staticmethod
     def _match_nonprofits(conversation_history: list[dict]) -> list[OrgSummary]:
         """
-        Match nonprofits based on conversation history.
-        This is a simplified version - you can enhance with semantic search/embeddings.
+        Match nonprofits based on conversation history using semantic matching.
         
-        For now, returns all orgs converted to OrgSummary format.
-        You can implement more sophisticated matching later.
+        Uses the matching prompt to analyze the conversation and identify the top 3
+        most relevant organizations based on the person's needs and situation.
+        
+        Args:
+            conversation_history: List of messages in OpenAI format
+        
+        Returns:
+            List of top 3 most relevant organizations as OrgSummary objects
         """
         # Get all organizations
         organizations = org_repository.get_all()
@@ -189,24 +200,120 @@ class LLMService:
             # Return empty list if no organizations found
             return []
         
-        # Convert Organization to OrgSummary format
-        # For now, use organization_name as name, description as description
-        # You can enhance this matching logic with embeddings/semantic search
-        orgs = [
-            OrgSummary(
-                id=org.id,
-                name=org.organization_name,
-                description=org.description or f"{org.program_name} - {org.organization_name}",
-            )
-            for org in organizations[:3]  # Return top 3 for now
-        ]
+        # If we have 3 or fewer organizations, just return all of them
+        # (no need for LLM matching when there are so few options)
+        if len(organizations) <= 3:
+            return [
+                OrgSummary(
+                    id=org.id,
+                    name=org.organization_name,
+                    description=org.description or f"{org.program_name} - {org.organization_name}",
+                )
+                for org in organizations
+            ]
         
-        # TODO: Implement semantic matching based on conversation_history
-        # - Use embeddings to match conversation content with org descriptions
-        # - Rank by relevance
-        # - Return top 3
+        # Initialize OpenAI client
+        if not settings.openai_api_key:
+            raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
         
-        return orgs
+        client = OpenAI(api_key=settings.openai_api_key)
+        
+        # Format conversation history and organizations
+        conversation_text = format_conversation_history(conversation_history)
+        orgs_text = format_organizations(organizations)
+        
+        # Create the matching prompt
+        matching_prompt = get_matching_prompt(conversation_text, orgs_text)
+        
+        # Call OpenAI API to get top 3 org IDs using tool calling
+        model = "gpt-4"
+        
+        # Define function for structured output
+        match_function = {
+            "type": "function",
+            "function": {
+                "name": "select_top_organizations",
+                "description": "Select the top 3 most relevant organization IDs based on the conversation",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "organization_ids": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "Array of exactly 3 organization IDs, ranked from most to least relevant. Must return exactly 3 IDs.",
+                            "minItems": 3,
+                            "maxItems": 3,
+                        },
+                        "reasoning": {
+                            "type": "string",
+                            "description": "Brief explanation of why these organizations were selected",
+                        },
+                    },
+                    "required": ["organization_ids", "reasoning"],
+                },
+            },
+        }
+        
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert at matching people with appropriate nonprofit organizations based on their needs and circumstances.",
+                },
+                {"role": "user", "content": matching_prompt},
+            ],
+            tools=[match_function],
+            tool_choice={"type": "function", "function": {"name": "select_top_organizations"}},
+        )
+        
+        # Extract organization IDs from tool call
+        try:
+            tool_call = response.choices[0].message.tool_calls[0]
+            function_args = json.loads(tool_call.function.arguments)
+            org_ids = function_args["organization_ids"]
+            
+            # Validate we got exactly 3 IDs
+            if len(org_ids) != 3:
+                # Fallback: return first 3 organizations
+                org_ids = [org.id for org in organizations[:3]]
+        except (IndexError, KeyError, json.JSONDecodeError, AttributeError) as e:
+            # Fallback: return first 3 organizations if tool call fails
+            print(f"Error extracting tool call: {e}")
+            org_ids = [org.id for org in organizations[:3]]
+        
+        # Create a mapping of org ID to Organization for quick lookup
+        org_map = {org.id: org for org in organizations}
+        
+        # Get the matched organizations in order
+        matched_orgs = []
+        for org_id in org_ids:
+            if org_id in org_map:
+                org = org_map[org_id]
+                matched_orgs.append(
+                    OrgSummary(
+                        id=org.id,
+                        name=org.organization_name,
+                        description=org.description
+                        or f"{org.program_name} - {org.organization_name}",
+                    )
+                )
+        
+        # If we didn't get 3 valid orgs, fill with remaining orgs (fallback)
+        if len(matched_orgs) < 3:
+            remaining_ids = set(org_map.keys()) - set(org_ids)
+            for org_id in list(remaining_ids)[: 3 - len(matched_orgs)]:
+                org = org_map[org_id]
+                matched_orgs.append(
+                    OrgSummary(
+                        id=org.id,
+                        name=org.organization_name,
+                        description=org.description
+                        or f"{org.program_name} - {org.organization_name}",
+                    )
+                )
+        
+        return matched_orgs[:3]
 
 
 __all__ = ["LLMService"]
