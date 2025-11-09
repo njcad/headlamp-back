@@ -36,6 +36,26 @@ def get_by_user_id(user_id: UUID) -> list[Application]:
     response = client.table("applications").select("*").eq("user_id", str(user_id)).execute()
     return [Application(**row) for row in response.data]
 
+
+def get_by_user_id_with_orgs(user_id: UUID) -> list[dict]:
+    """
+    Get all applications for a user with joined organization information.
+    
+    Returns list of dicts with application data and organization data.
+    """
+    client = get_supabase_client()
+    
+    # Join applications with services table on organization_id
+    # Supabase PostgREST syntax: services:organization_id means join services table where services.id = applications.organization_id
+    response = (
+        client.table("applications")
+        .select("*, services:organization_id(id, organization_name, description, program_name)")
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+    
+    return response.data if response.data else []
+
 def get_by_organization_id(organization_id: int) -> list[Application]:
     """Get all applications for an organization."""
     client = get_supabase_client()

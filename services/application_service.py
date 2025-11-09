@@ -144,8 +144,57 @@ class ApplicationService:
         return created_applications
 
     @staticmethod
-    async def get_user_applications(user_id: UUID) -> list[Application]:
-        return application_repository.get_by_user_id(user_id)
+    async def get_user_applications(user_id: UUID) -> list[dict]:
+        """
+        Get all applications for a user with organization details.
+        
+        Returns list of dicts with 'application' and 'organization' keys.
+        """
+        # Get applications with joined organization data
+        applications_data = application_repository.get_by_user_id_with_orgs(user_id)
+        
+        result = []
+        for app_data in applications_data:
+            # Extract organization data from the joined response
+            # Supabase returns joined data in a nested structure
+            org_data = app_data.get("services")
+            if not org_data:
+                # If join failed, skip this application
+                continue
+            
+            # Handle case where services might be a list (if multiple matches) or a dict
+            if isinstance(org_data, list) and len(org_data) > 0:
+                org_data = org_data[0]
+            elif not isinstance(org_data, dict):
+                continue
+            
+            # Create Application model
+            application = Application(
+                id=app_data["id"],
+                user_id=app_data["user_id"],
+                organization_id=app_data["organization_id"],
+                urgent=app_data.get("urgent", False),
+                content=app_data["content"],
+                submitted_at=app_data["submitted_at"],
+                opened_at=app_data.get("opened_at"),
+                accepted_at=app_data.get("accepted_at"),
+                denied_at=app_data.get("denied_at"),
+            )
+            
+            # Create OrgSummary from organization data
+            organization = OrgSummary(
+                id=org_data.get("id"),
+                name=org_data.get("organization_name", ""),
+                description=org_data.get("description") or f"{org_data.get('program_name', '')} - {org_data.get('organization_name', '')}",
+            )
+            
+            # Return dict with both application and organization
+            result.append({
+                "application": application,
+                "organization": organization,
+            })
+        
+        return result
 
     @staticmethod
     async def get_organization_applications(organization_id: int) -> list[Application]:
