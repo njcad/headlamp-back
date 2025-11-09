@@ -11,6 +11,7 @@ router = APIRouter()
 async def chat(request: ChatRequest) -> ChatResponse:
     """Handle chat requests from users."""
     print(request)
+    print(request.doApply)
     return await ControllerService.handle_chat(request)
 
 

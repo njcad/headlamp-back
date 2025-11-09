@@ -29,6 +29,7 @@ class ControllerService:
             user_id=user.id,
             message=request.message,
             clickedOrgIds=request.clickedOrgIds,
+            doApply=request.doApply,
         )
 
 

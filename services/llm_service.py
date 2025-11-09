@@ -2,7 +2,7 @@
 import json
 from typing import Optional
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from config import settings
 from models.org import OrgSummary
@@ -75,11 +75,11 @@ class LLMService:
                 "orgs": Optional[list[OrgSummary]],  # Organizations if matching tool was called
             }
         """
-        # Initialize OpenAI client
+        # Initialize async OpenAI client
         if not settings.openai_api_key:
             raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
         
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
         
         # Get intake questions for system prompt
         intake_questions = intake_question_repository.get_all()
@@ -100,7 +100,7 @@ class LLMService:
         
         # Call OpenAI API
         model = "gpt-4"  # or "gpt-4-turbo-preview" for newer models
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=messages,
             tools=LLMService.TOOLS,
@@ -135,7 +135,7 @@ class LLMService:
                 
                 if function_name == "match_nonprofits":
                     # Execute matching logic
-                    matched_orgs = LLMService._match_nonprofits(conversation_history)
+                    matched_orgs = await LLMService._match_nonprofits(conversation_history)
                     orgs = matched_orgs
                     
                     tool_results.append({
@@ -163,7 +163,7 @@ class LLMService:
                 messages.extend(tool_results)
                 
                 # Get final response
-                final_response = client.chat.completions.create(
+                final_response = await client.chat.completions.create(
                     model=model,
                     messages=messages,
                     tools=LLMService.TOOLS,
@@ -180,7 +180,7 @@ class LLMService:
         }
 
     @staticmethod
-    def _match_nonprofits(conversation_history: list[dict]) -> list[OrgSummary]:
+    async def _match_nonprofits(conversation_history: list[dict]) -> list[OrgSummary]:
         """
         Match nonprofits based on conversation history using semantic matching.
         
@@ -212,11 +212,11 @@ class LLMService:
                 for org in organizations
             ]
         
-        # Initialize OpenAI client
+        # Initialize async OpenAI client
         if not settings.openai_api_key:
             raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
         
-        client = OpenAI(api_key=settings.openai_api_key)
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
         
         # Format conversation history and organizations
         conversation_text = format_conversation_history(conversation_history)
@@ -254,7 +254,7 @@ class LLMService:
             },
         }
         
-        response = client.chat.completions.create(
+        response = await client.chat.completions.create(
             model=model,
             messages=[
                 {
@@ -314,6 +314,228 @@ class LLMService:
                 )
         
         return matched_orgs[:3]
+
+    @staticmethod
+    async def generate_application_content(
+        conversation_history: list[dict],
+        intake_questions: list,
+        organization_name: str,
+    ) -> str:
+        """
+        Generate application content from conversation history and intake questions.
+        
+        The content includes:
+        - A brief summary of the applicant's situation
+        - Question: Answer pairs for questions that can be answered from the conversation
+        
+        Args:
+            conversation_history: List of messages in OpenAI format
+            intake_questions: List of IntakeQuestion objects
+            organization_name: Name of the organization the application is for
+        
+        Returns:
+            Formatted application content string
+        """
+        # Initialize async OpenAI client
+        if not settings.openai_api_key:
+            raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
+        
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        # Format conversation history
+        conversation_text = format_conversation_history(conversation_history)
+        
+        # Format intake questions
+        questions_text = "\n".join([
+            f"{i+1}. {q.question}"
+            for i, q in enumerate(intake_questions)
+        ])
+        
+        # Create prompt for generating application content
+        application_prompt = f"""Based on the following conversation with an applicant, generate a professional application document for {organization_name}.
+
+CONVERSATION HISTORY:
+{conversation_text}
+
+INTAKE QUESTIONS TO ANSWER:
+{questions_text}
+
+Please generate an application document that includes:
+1. A brief summary (2-3 sentences) of the applicant's situation and what they need help with
+2. A section with "Question: Answer" pairs for each intake question that can be answered from the conversation history
+3. For questions that cannot be answered from the conversation, you may write "Not discussed" or omit them
+
+Format the response as a clear, professional document suitable for a nonprofit organization to review. Use clear headings and formatting."""
+
+        # Call OpenAI API
+        model = "gpt-4"
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that creates professional application documents for nonprofit organizations based on conversation history.",
+                },
+                {"role": "user", "content": application_prompt},
+            ],
+        )
+        
+        # Extract response content
+        application_content = response.choices[0].message.content or ""
+        
+        if not application_content:
+            # Fallback if empty response
+            application_content = "Application generated from conversation history. Please review the conversation for details."
+        
+        return application_content
+
+    @staticmethod
+    async def generate_application_summary(conversation_history: list[dict]) -> str:
+        """
+        Generate a brief summary of the applicant's situation from conversation history.
+        
+        Args:
+            conversation_history: List of messages in OpenAI format
+        
+        Returns:
+            Brief summary string (2-3 sentences)
+        """
+        # Initialize async OpenAI client
+        if not settings.openai_api_key:
+            raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
+        
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        # Format conversation history
+        conversation_text = format_conversation_history(conversation_history)
+        
+        # Create prompt for generating summary
+        summary_prompt = f"""Based on the following conversation, write a brief summary (2-3 sentences) of the person's situation and what they need help with.
+
+CONVERSATION HISTORY:
+{conversation_text}
+
+Write a concise, professional summary that captures:
+- Their current situation
+- What kind of help or services they need
+- Any urgent or important details
+
+Keep it to 2-3 sentences."""
+
+        # Call OpenAI API
+        model = "gpt-4"
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that creates concise summaries of people's situations and needs.",
+                },
+                {"role": "user", "content": summary_prompt},
+            ],
+        )
+        
+        # Extract response content
+        summary = response.choices[0].message.content or ""
+        
+        if not summary:
+            # Fallback if empty response
+            summary = "Summary of applicant's situation and needs."
+        
+        return summary
+
+    @staticmethod
+    async def extract_contact_info(conversation_history: list[dict]) -> dict[str, str]:
+        """
+        Extract contact information (name, phone, email) from conversation history.
+        
+        Args:
+            conversation_history: List of messages in OpenAI format
+        
+        Returns:
+            Dictionary with 'name', 'phone', and 'email' keys (empty strings if not found)
+        """
+        # Initialize async OpenAI client
+        if not settings.openai_api_key:
+            raise ValueError("OpenAI API key not configured. Set OPENAI_API_KEY in .env")
+        
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        
+        # Format conversation history
+        conversation_text = format_conversation_history(conversation_history)
+        
+        # Create prompt for extracting contact info
+        contact_prompt = f"""Based on the following conversation, extract the person's contact information.
+
+CONVERSATION HISTORY:
+{conversation_text}
+
+Extract the following information if mentioned:
+- Full name (or first name if that's all that's provided)
+- Phone number
+- Email address
+
+If any information is not mentioned in the conversation, return an empty string for that field."""
+
+        # Define function for structured output using tool calling
+        extract_contact_function = {
+            "type": "function",
+            "function": {
+                "name": "extract_contact_information",
+                "description": "Extract contact information (name, phone, email) from the conversation",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Full name or first name of the person. Empty string if not mentioned.",
+                        },
+                        "phone": {
+                            "type": "string",
+                            "description": "Phone number of the person. Empty string if not mentioned.",
+                        },
+                        "email": {
+                            "type": "string",
+                            "description": "Email address of the person. Empty string if not mentioned.",
+                        },
+                    },
+                    "required": ["name", "phone", "email"],
+                },
+            },
+        }
+
+        # Call OpenAI API with tool calling
+        model = "gpt-4"
+        response = await client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a helpful assistant that extracts contact information from conversations.",
+                },
+                {"role": "user", "content": contact_prompt},
+            ],
+            tools=[extract_contact_function],
+            tool_choice={"type": "function", "function": {"name": "extract_contact_information"}},
+        )
+        
+        # Extract contact info from tool call
+        try:
+            tool_call = response.choices[0].message.tool_calls[0]
+            function_args = json.loads(tool_call.function.arguments)
+            return {
+                "name": function_args.get("name", ""),
+                "phone": function_args.get("phone", ""),
+                "email": function_args.get("email", ""),
+            }
+        except (IndexError, KeyError, json.JSONDecodeError, AttributeError) as e:
+            # Fallback if tool call extraction fails
+            print(f"Error extracting contact info from tool call: {e}")
+            return {
+                "name": "",
+                "phone": "",
+                "email": "",
+            }
 
 
 __all__ = ["LLMService"]
