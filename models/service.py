@@ -4,7 +4,8 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
-class Service(BaseModel):
+class Organization(BaseModel):
+    """Organization model for database (full details)."""
     id: int
     organization_name: str
     program_name: str
@@ -15,5 +16,5 @@ class Service(BaseModel):
     intake_question_ids: list[int] = Field(default_factory=list)
 
 
-__all__ = ["Service"]
+__all__ = ["Organization"]
 
