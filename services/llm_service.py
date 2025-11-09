@@ -6,13 +6,13 @@ from openai import AsyncOpenAI
 
 from config import settings
 from models.org import OrgSummary
-from prompts.intake import get_intake_system_prompt
+from prompts.intake import get_intake_questions, get_intake_system_prompt
 from prompts.matching import (
     format_conversation_history,
     format_organizations,
     get_matching_prompt,
 )
-from repos import intake_question_repository, org_repository
+from repos import org_repository
 
 
 class LLMService:
@@ -81,12 +81,8 @@ class LLMService:
         
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         
-        # Get intake questions for system prompt
-        intake_questions = intake_question_repository.get_all()
-        question_texts = [q.question for q in intake_questions]
-        
-        # Build system prompt
-        system_prompt = get_intake_system_prompt(question_texts)
+        # Build system prompt (uses hardcoded prompt from prompts/intake.py)
+        system_prompt = get_intake_system_prompt()
         
         # If user selected orgs, add context about that
         if clickedOrgIds:
@@ -99,13 +95,13 @@ class LLMService:
         ]
         
         print(f"DEBUG: System prompt length: {len(system_prompt)}")
-        print(f"DEBUG: Number of intake questions: {len(question_texts)}")
+        print(f"DEBUG: Number of essential information fields: {len(get_intake_questions())}")
         print(f"DEBUG: Conversation history length: {len(conversation_history)}")
         print(f"DEBUG: Tool choice: auto")
         print(f"DEBUG: Available tools: {[tool['function']['name'] for tool in LLMService.TOOLS]}")
         
         # Call OpenAI API
-        model = "gpt-5-mini"  # or "gpt-4-turbo-preview" for newer models
+        model = "gpt-4.1"  # or "gpt-4-turbo-preview" for newer models
         response = await client.chat.completions.create(
             model=model,
             messages=messages,
@@ -265,7 +261,7 @@ class LLMService:
         print(f"DEBUG _match_nonprofits: Matching prompt length: {len(matching_prompt)}")
         
         # Call OpenAI API to get top 3 org IDs using tool calling
-        model = "gpt-5-mini"
+        model = "gpt-4.1"
         
         # Define function for structured output
         match_function = {
@@ -363,7 +359,7 @@ class LLMService:
     @staticmethod
     async def generate_application_content(
         conversation_history: list[dict],
-        intake_questions: list,
+        intake_questions: list[str],
         organization_name: str,
     ) -> str:
         """
@@ -375,7 +371,7 @@ class LLMService:
         
         Args:
             conversation_history: List of messages in OpenAI format
-            intake_questions: List of IntakeQuestion objects
+            intake_questions: List of intake question/information field strings
             organization_name: Name of the organization the application is for
         
         Returns:
@@ -390,9 +386,9 @@ class LLMService:
         # Format conversation history
         conversation_text = format_conversation_history(conversation_history)
         
-        # Format intake questions
+        # Format intake questions (now a list of strings)
         questions_text = "\n".join([
-            f"{i+1}. {q.question}"
+            f"{i+1}. {q}"
             for i, q in enumerate(intake_questions)
         ])
         
@@ -413,7 +409,7 @@ Please generate an application document that includes:
 Format the response as a clear, professional document suitable for a nonprofit organization to review. Use clear headings and formatting."""
 
         # Call OpenAI API
-        model = "gpt-5-mini"
+        model = "gpt-4.1"
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -468,7 +464,7 @@ Write a concise, professional summary that captures:
 Keep it to 2-3 sentences."""
 
         # Call OpenAI API
-        model = "gpt-5-mini"
+        model = "gpt-4.1"
         response = await client.chat.completions.create(
             model=model,
             messages=[
@@ -550,7 +546,7 @@ If any information is not mentioned in the conversation, return an empty string 
         }
 
         # Call OpenAI API with tool calling
-        model = "gpt-5-mini"
+        model = "gpt-4.1"
         response = await client.chat.completions.create(
             model=model,
             messages=[

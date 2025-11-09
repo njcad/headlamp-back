@@ -3,9 +3,9 @@ from uuid import UUID
 
 from models.application import Application
 from models.application_draft import ApplicationDraft
-from models.intake_question import IntakeQuestion
 from models.org import OrgSummary
-from repos import application_repository, intake_question_repository, org_repository
+from prompts.intake import get_intake_questions
+from repos import application_repository, org_repository
 from services.llm_service import LLMService
 
 
@@ -32,8 +32,8 @@ class ApplicationService:
         Returns:
             ApplicationDraft with summary and content for each organization
         """
-        # Get all intake questions (not filtered by org - answer all questions)
-        intake_questions = intake_question_repository.get_all()
+        # Get all essential information fields (from prompts/intake.py - same fields used in system prompt)
+        intake_questions = get_intake_questions()
         
         # Get all organizations to validate IDs and get their details
         all_orgs = org_repository.get_all()
